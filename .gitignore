@@ -1,0 +1,14 @@
+/target
+/Cargo.lock
+/.idea
+.env
+
+
+
+/commupack
+/commupack.zip
+
+# game data
+/mc.zip
+# Editor-based HTTP Client requests
+http-client.private.env.json

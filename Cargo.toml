@@ -1,0 +1,10 @@
+[workspace]
+members = ["sentinel", "console", "common", "deployment", "fov-calculator"]
+
+
+[profile.release]
+# optimization over all codebase ( better optimization, slower build )
+codegen-units = 1
+# link time optimization using using whole-program analysis
+lto = true
+opt-level = 'z'

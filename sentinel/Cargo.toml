@@ -1,0 +1,21 @@
+[package]
+name = "sentinel"
+version = "0.0.0"
+edition = "2021"
+description = "auth server and wathcer running on a different never-shutdown server."
+
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+common = {path = "../common"}
+ssh2 = "0.9.3"
+aws-sdk-ec2 = "0.9"
+aws-config = "0.9"
+tokio = { version = "1", features = ["full"] }
+dotenv = "0.15"
+axum = {version= "0.5", features = ["ws", "headers"]}
+tower-http = { version = "0.2.5" , features = ["auth"]}
+bincode = "2.0.0-rc.1"
+
+

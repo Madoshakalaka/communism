@@ -1,0 +1,3 @@
+[build]
+dist = "dist/debug/minecraft/fov-calculator"
+public_url = "/minecraft/fov-calculator/"

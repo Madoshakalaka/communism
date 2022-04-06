@@ -1,0 +1,4 @@
+Communism owns.
+
+Communism rocks.
+

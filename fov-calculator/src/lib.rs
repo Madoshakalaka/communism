@@ -29,16 +29,13 @@ impl Degree {
     }
 }
 
-pub fn calculate_fov<W: Into<Centimeter>, H: Into<Centimeter>, D: Into<Centimeter>>(
-    window_width: W,
+pub fn calculate_fov<H: Into<Centimeter>, D: Into<Centimeter>>(
     window_height: H,
     distance_from_screen: D,
 ) -> Degree {
-    let window_width: Centimeter = window_width.into();
     let window_height: Centimeter = window_height.into();
     let distance_from_screen = distance_from_screen.into();
     let rad = 2.0
-        * f64::atan(window_width.scaled(0.5) / distance_from_screen)
-        * (window_width / window_height);
+        * f64::atan(window_height.scaled(0.5) / distance_from_screen);
     Degree::from_radian(rad)
 }

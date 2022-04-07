@@ -91,22 +91,22 @@ impl Unit {
     }
 }
 
-#[derive(Clone, Serialize, Deserialize)]
-struct GameWidth {
-    value: f64,
-    unit: Unit,
-}
+// #[derive(Clone, Serialize, Deserialize)]
+// struct GameWidth {
+//     value: f64,
+//     unit: Unit,
+// }
 
-impl Default for GameWidth {
-    fn default() -> Self {
-        Self {
-            value: 59.8,
-            unit: Unit::Cm,
-        }
-    }
-}
-
-impl Persistent for GameWidth {}
+// impl Default for GameWidth {
+//     fn default() -> Self {
+//         Self {
+//             value: 59.8,
+//             unit: Unit::Cm,
+//         }
+//     }
+// }
+//
+// impl Persistent for GameWidth {}
 
 #[derive(Clone, Serialize, Deserialize)]
 struct GameHeight {
@@ -141,16 +141,12 @@ impl Default for EyeDistance {
 }
 
 #[derive(Clone, Serialize, Deserialize)]
-struct Notes(Vec<(GameWidth, GameHeight, EyeDistance, String)>);
+struct Notes(Vec<(GameHeight, EyeDistance, String)>);
 
 impl Default for Notes {
     fn default() -> Self {
         Self(vec![
             (
-                GameWidth {
-                    value: 59.8,
-                    unit: Unit::Cm,
-                },
                 GameHeight {
                     value: 31.6,
                     unit: Unit::Cm,
@@ -162,10 +158,17 @@ impl Default for Notes {
                 "sitting straight but relaxed, 27'' monitor, maximized window".to_string(),
             ),
             (
-                GameWidth {
-                    value: 59.8,
+                GameHeight {
+                    value: 31.6,
                     unit: Unit::Cm,
                 },
+                EyeDistance {
+                    value: 22.0,
+                    unit: Unit::Cm,
+                },
+                "sitting close, 27'' monitor, maximized window".to_string(),
+            ),
+            (
                 GameHeight {
                     value: 33.6,
                     unit: Unit::Cm,
@@ -186,53 +189,53 @@ impl Persistent for EyeDistance {}
 
 #[function_component(FovCalculator)]
 pub fn fov_calc() -> Html {
-    let width = use_store::<PersistentStore<GameWidth>>();
+    // let width = use_store::<PersistentStore<GameWidth>>();
     let height = use_store::<PersistentStore<GameHeight>>();
     let distance = use_store::<PersistentStore<EyeDistance>>();
     let notes = use_store::<PersistentStore<Notes>>();
 
-    let width_input_ref = NodeRef::default();
-    let width_input = html! {<input oninput={
-        let width = width.dispatch().clone();
-
-        move |e: InputEvent|{
-                let input: HtmlInputElement = e.target_unchecked_into();
-                if let Ok(input_width) = input.value().parse::<f64>(){
-                width.reduce(move |w|{
-                w.value = input_width
-            });
-            }
-
-            }
-    } ref={width_input_ref.clone()} type="number" value = {width.state().map(|w| w.value).unwrap_or_default().to_string()}/> };
-
-    let width_label = label(
-        ""
-    )
-        .child(h2("The width of your Minecraft window"))
-        .child(p("If you play in fullscreen or maximized windowed mode, it's the width of your monitor.")
-            .child(br())
-            .child("Note: a 27 inch monitor has a DIAGONAL length of 27 inch, not the width. look up monitor dimensions ")
-            .child(a("here")
-                .href("https://en.tab-tv.com/?page_id=7333#:~:text=Size%20screen%2019%2D105%20inch%20height%20and%20width".into()).rel("noopener".into()).target("_blank".into()))
-        )
-    .child(br())
-    .child(
-        width_input
-    )
-    .child(
-        select()
-            .child(option().selected("selected".into()).text(Unit::Cm.into_option_value()))
-            .child(option().text(Unit::Inch.into_option_value()))
-            .listener({
-                let width = width.dispatch().clone();
-
-                on_change(move |e| {
-                let element = e.target_unchecked_into::<HtmlSelectElement>();
-                let u = Unit::from_option_value(&element.value());
-                    width.reduce(move |w| w.unit = u);
-            })}),
-    );
+    // let width_input_ref = NodeRef::default();
+    // let width_input = html! {<input oninput={
+    //     let width = width.dispatch().clone();
+    //
+    //     move |e: InputEvent|{
+    //             let input: HtmlInputElement = e.target_unchecked_into();
+    //             if let Ok(input_width) = input.value().parse::<f64>(){
+    //             width.reduce(move |w|{
+    //             w.value = input_width
+    //         });
+    //         }
+    //
+    //         }
+    // } ref={width_input_ref.clone()} type="number" value = {width.state().map(|w| w.value).unwrap_or_default().to_string()}/> };
+    //
+    // let width_label = label(
+    //     ""
+    // )
+    //     .child(h2("The width of your Minecraft window"))
+    //     .child(p("If you play in fullscreen or maximized windowed mode, it's the width of your monitor.")
+    //         .child(br())
+    //         .child("Note: a 27 inch monitor has a DIAGONAL length of 27 inch, not the width. look up monitor dimensions ")
+    //         .child(a("here")
+    //             .href("https://en.tab-tv.com/?page_id=7333#:~:text=Size%20screen%2019%2D105%20inch%20height%20and%20width".into()).rel("noopener".into()).target("_blank".into()))
+    //     )
+    // .child(br())
+    // .child(
+    //     width_input
+    // )
+    // .child(
+    //     select()
+    //         .child(option().selected("selected".into()).text(Unit::Cm.into_option_value()))
+    //         .child(option().text(Unit::Inch.into_option_value()))
+    //         .listener({
+    //             let width = width.dispatch().clone();
+    //
+    //             on_change(move |e| {
+    //             let element = e.target_unchecked_into::<HtmlSelectElement>();
+    //             let u = Unit::from_option_value(&element.value());
+    //                 width.reduce(move |w| w.unit = u);
+    //         })}),
+    // );
 
     let height_input_ref = NodeRef::default();
     let height_input = html! {<input oninput={
@@ -253,7 +256,14 @@ pub fn fov_calc() -> Html {
         ""
     )
         .child(h2("The height of your Minecraft window"))
-        .child(p("If you play in fullscreen mode, it's the height of your monitor. If you play in maximized window mode, it's a bit less than the height of your monitor (by roughly 2cm)."))
+        .child(p("If you play in fullscreen mode, it's the height of your monitor. If you play in maximized window mode, it's a bit less than the height of your monitor (by roughly 2cm).")
+            .child(br())
+                       .child("Note: a 27 inch monitor has a DIAGONAL length of 27 inch, not the height. look up monitor dimensions ")
+                       .child(a("here")
+                           .href("https://en.tab-tv.com/?page_id=7333#:~:text=Size%20screen%2019%2D105%20inch%20height%20and%20width".into()).rel("noopener".into()).target("_blank".into()))
+
+
+        )
         .child(br())
         .child(
             height_input
@@ -312,17 +322,17 @@ pub fn fov_calc() -> Html {
 
     let right_margin = use_style!("margin-right: 2rem;");
 
-    result = if let (Some(width), Some(height), Some(distance)) =
-        (width.state(), height.state(), distance.state())
+    result = if let (Some(height), Some(distance)) =
+        (height.state(), distance.state())
     {
         #[cfg(debug_assertions)]
         log::debug!("computing result");
 
-        let best = calculate_fov(width, height, distance);
+        let best = calculate_fov(height, distance);
 
         let add_note_dispatch = notes.dispatch().clone();
 
-        let width = (**width).clone();
+        // let width = (**width).clone();
         let height = (**height).clone();
         let distance = (**distance).clone();
 
@@ -331,14 +341,14 @@ pub fn fov_calc() -> Html {
             .child(
                 button("Take Notes (chair position, posture, monitor etc.)").listener(on_click(
                     move |_| {
-                        let width = width.clone();
+                        // let width = width.clone();
                         let height = height.clone();
                         let distance = distance.clone();
 
                         add_note_dispatch.reduce(move |n| {
                             let note_text =
                                 gloo_dialogs::prompt("Note text:", None).unwrap_or_default();
-                            n.0.push((width, height, distance, note_text))
+                            n.0.push((height, distance, note_text))
                         })
                     },
                 )),
@@ -356,7 +366,8 @@ pub fn fov_calc() -> Html {
     );
 
     let note_table = table().class(note_table_class).child(
-        tr().child(th().child("window width"))
+        tr()
+            // .child(th().child("window width"))
             .child(th().child("window height"))
             .child(th().child("distance"))
             .child(th().child("FOV"))
@@ -371,10 +382,6 @@ pub fn fov_calc() -> Html {
             let make_table =
                 |ind: usize,
                  (
-                    ref w @ GameWidth {
-                        value: width,
-                        unit: width_unit,
-                    },
                     ref h @ GameHeight {
                         value: height,
                         unit: height_unit,
@@ -387,12 +394,13 @@ pub fn fov_calc() -> Html {
                 ),
                  delete_button_class: AttrValue,
                  delete_note_dispatch: Dispatch<PersistentStore<Notes>>| {
-                    let best = calculate_fov(w, h, d);
-                    let width_unit = width_unit.into_option_value();
+                    let best = calculate_fov(h, d);
+                    // let width_unit = width_unit.into_option_value();
                     let height_unit = height_unit.into_option_value();
                     let distance_unit = distance_unit.into_option_value();
 
-                    tr().child(td().child(format!("{width} {width_unit}")))
+                    tr()
+                        // .child(td().child(format!("{width} {width_unit}")))
                         .child(td().child(format!("{height} {height_unit}")))
                         .child(td().child(format!("{distance} {distance_unit}")))
                         .child(td().child(format!("{best:.0}")))
@@ -420,7 +428,6 @@ pub fn fov_calc() -> Html {
     };
 
     fragment()
-        .child(width_label)
         .child(height_label)
         .child(distance_label)
         .child(result)
@@ -428,14 +435,14 @@ pub fn fov_calc() -> Html {
         .into()
 }
 
-fn calculate_fov(width: &GameWidth, height: &GameHeight, distance: &EyeDistance) -> Degree {
-    let width = if matches!(width.unit, Unit::Inch) {
-        #[cfg(debug_assertions)]
-        log::debug!("width has unit inch, converting to cm");
-        Unit::Cm.toggle_to(width.value)
-    } else {
-        width.value
-    };
+fn calculate_fov(height: &GameHeight, distance: &EyeDistance) -> Degree {
+    // let width = if matches!(width.unit, Unit::Inch) {
+    //     #[cfg(debug_assertions)]
+    //     log::debug!("width has unit inch, converting to cm");
+    //     Unit::Cm.toggle_to(width.value)
+    // } else {
+    //     width.value
+    // };
     let height = if matches!(height.unit, Unit::Inch) {
         #[cfg(debug_assertions)]
         log::debug!("height has unit inch, converting to cm");
@@ -452,7 +459,7 @@ fn calculate_fov(width: &GameWidth, height: &GameHeight, distance: &EyeDistance)
         distance.value
     };
 
-    fov_calculator::calculate_fov(width, height, distance)
+    fov_calculator::calculate_fov(height, distance)
 }
 
 fn main() {

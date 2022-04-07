@@ -10,6 +10,7 @@ use axum::{extract::{
 use std::env;
 use std::error::Error;
 use std::fmt::{Debug, Display, Formatter};
+use std::ops::Deref;
 use std::time::Duration;
 
 use common::{ClientOpt, ContainerStatus, OnlinePeople, ServerStatus};
@@ -93,10 +94,31 @@ async fn ws_handler(
 
     ws.on_upgrade(|socket: WebSocket| handle_socket(socket, rx))
 }
-async fn handle_socket(mut socket: WebSocket, rx: Receiver<Option<ServerStatus>>) {
+async fn handle_socket(mut socket: WebSocket, mut rx: Receiver<Option<ServerStatus>>) {
 
 
     let config = bincode::config::standard();
+
+    let broadcast_status = async {
+
+        loop{
+            rx.changed().await.ok();
+            rx.borrow_and_update()
+                .as_ref()
+                .map(|ServerStatus{ host, container, online }|{
+                // todo: send via websocket
+            })
+
+
+
+        }
+
+
+
+
+
+    };
+
 
     while let Some(msg) = socket.recv().await {
         if let Ok(msg) = msg {

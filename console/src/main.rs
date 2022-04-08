@@ -55,9 +55,9 @@ pub fn app() -> Html {
     let authenticating = use_state(|| false);
 
     let socket = if cfg!(debug_assertions) {
-        "ws://localhost:3000/ws"
+        "wss://localhost:3000/ws"
     } else {
-        "wss://siyuanyan.net/ws"
+        "wss://siyuanyan.net:3000/ws"
     };
 
     // let open_soc = use_ref(||Arc::new(Mutex::new(WebSocket::open(socket).ok())));

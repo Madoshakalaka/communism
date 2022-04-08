@@ -24,6 +24,7 @@ use std::ops::{AddAssign, SubAssign};
 use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Duration;
+use axum_server::tls_rustls::RustlsConfig;
 use tokio::sync::watch::Receiver;
 use tokio::sync::{Mutex, Notify};
 
@@ -404,12 +405,22 @@ async fn main() -> Result<(), Ec2Error> {
         .layer(Extension(con_notify));
 
     let app = Router::new().nest("/ws", ws_router);
-    // .route("/auth", post(|| async { StatusCode::OK }))
-    // .layer(auth);
 
-    // run it with hyper on localhost:3000
-    let server =
-        axum::Server::bind(&"0.0.0.0:3000".parse().unwrap()).serve(app.into_make_service());
+    let config = RustlsConfig::from_pem_file(
+        dotenv::var("CERT_FILE").unwrap(),
+        dotenv::var("KEY_FILE").unwrap(),
+    )
+        .await
+        .unwrap();
+
+    let addr = SocketAddr::from(([0, 0, 0, 0], 3000));
+    println!("https listening on {}", addr);
+    let server = axum_server::bind_rustls(addr, config)
+        .serve(app.into_make_service());
+
+
+    // let server =
+    //     axum::Server::bind(&"0.0.0.0:3000".parse().unwrap()).serve(app.into_make_service());
 
     tokio::select! {
         _ = endless_poll =>{

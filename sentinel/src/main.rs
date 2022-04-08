@@ -13,7 +13,7 @@ use axum::{
     routing::{get, get_service, post},
     Extension, Router,
 };
-use common::{ClientOpt, ContainerStatus, OnlinePeople, ServerStatus};
+use common::{AuthResult, ClientOpt, ContainerStatus, Newspeak, OnlinePeople, ServerStatus};
 use futures::{
     sink::SinkExt,
     stream::{SplitSink, SplitStream, StreamExt},
@@ -24,8 +24,9 @@ use std::env;
 use std::error::Error;
 use std::fmt::{Debug, Display, Formatter};
 use std::io::Read;
-use std::net::TcpStream;
+use std::net::{IpAddr, SocketAddr, TcpStream};
 use std::ops::{AddAssign, Deref, SubAssign};
+use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::watch::{Receiver, Sender};
@@ -133,21 +134,26 @@ async fn handle_socket(
 
     let config = bincode::config::standard();
 
-    let broadcast_status = async {
-        loop {
-            rx.changed().await.ok();
-            let s = rx.borrow_and_update().as_ref().cloned();
-            if let Some(s) = s {
-                if let Ok(s) = bincode::encode_to_vec(s, config) {
-                    let send_result = {
-                        let mut sender = sender.lock().await;
-                        let sender = sender.borrow_mut();
-                        sender.send(Message::Binary(s)).await
-                    };
 
-                    if send_result.is_err() {
-                        // client disconnected
-                        return;
+    let broadcast_status = {
+        let sender = sender.clone();
+
+        async move {
+            loop {
+                rx.changed().await.ok();
+                let s = rx.borrow_and_update().as_ref().cloned();
+                if let Some(s) = s {
+                    if let Ok(s) = bincode::encode_to_vec(Newspeak::ServerStatus(s), config) {
+                        let send_result = {
+                            let mut sender = sender.lock().await;
+                            let sender = sender.borrow_mut();
+                            sender.send(Message::Binary(s)).await
+                        };
+
+                        if send_result.is_err() {
+                            // client disconnected
+                            return;
+                        }
                     }
                 }
             }
@@ -161,6 +167,9 @@ async fn handle_socket(
                     Message::Text(p) => {
                         if p == dotenv::var("PASSWORD").unwrap() {
                             break 'outer;
+                        }else{
+                            tracing::info!("wrong password received");
+                            sender.lock().await.send(Message::Binary(bincode::encode_to_vec(Newspeak::AuthResult(AuthResult::Sus), config).unwrap())).await.ok();
                         }
                     }
                     Message::Close(_) => return,
@@ -170,6 +179,9 @@ async fn handle_socket(
                 return;
             }
         }
+
+        tracing::info!("a client authenticated");
+        sender.lock().await.send(Message::Binary(bincode::encode_to_vec(Newspeak::AuthResult(AuthResult::Goob), config).unwrap())).await.ok();
 
         while let Some(msg) = receiver.next().await {
             if let Ok(msg) = msg {
@@ -183,13 +195,19 @@ async fn handle_socket(
                         {
                             match decoded {
                                 ClientOpt::On => {
+                                    tracing::info!("received power on request");
                                     send_to_instance!(client, start_instances);
+                                    sender.lock().await.send(Message::Binary(bincode::encode_to_vec(Newspeak::Feedback("sentinel acknowledged the request, will boot the host shortly".to_string()), config).unwrap())).await.ok();
                                 }
                                 ClientOpt::Off => {
-                                    send_to_instance!(client, start_instances);
+                                    tracing::info!("received power off request");
+                                    send_to_instance!(client, stop_instances);
+                                    sender.lock().await.send(Message::Binary(bincode::encode_to_vec(Newspeak::Feedback("sentinel acknowledged the request, will shutdown the host shortly".to_string()), config).unwrap())).await.ok();
                                 }
                                 ClientOpt::Reboot => {
+                                    tracing::info!("received reboot request");
                                     send_to_instance!(client, reboot_instances);
+                                    sender.lock().await.send(Message::Binary(bincode::encode_to_vec(Newspeak::Feedback("sentinel acknowledged the request, will reboot the host shortly".to_string()), config).unwrap())).await.ok();
                                 }
                             }
                         }
@@ -232,18 +250,33 @@ async fn handle_socket(
         let con = con.borrow_mut();
         con.sub_assign(1);
     }
+    tracing::info!("a client left");
 }
 
-async fn poll_server_status(client: &Client, sess: Session) -> ServerStatus {
+async fn poll_server_status(client: &Client) -> Option<ServerStatus> {
     let host = show_state(&client)
         .await
         .map_or("failed to get instance state".to_string(), |n| {
             n.as_str().to_string()
         });
 
+
     let (container, online) = if host.contains("running") {
-        let mut channel = sess.channel_session().unwrap();
-        channel.exec("docker container ls").unwrap();
+        let addr = SocketAddr::new(IpAddr::from_str(&dotenv::var("MC_HOST").unwrap()).unwrap(), 22);
+        let tcp = TcpStream::connect_timeout(&addr,Duration::from_secs(3)).ok()?;
+        let mut sess = Session::new().unwrap();
+        sess.set_tcp_stream(tcp);
+        sess.handshake().unwrap();
+        sess.userauth_pubkey_file(
+            "root",
+            None,
+            dotenv::var("PRIVATE_KEY").unwrap().as_ref(),
+            None,
+        )
+            .unwrap();
+        sess.set_keepalive(false, 40);
+        let mut channel = sess.channel_session().ok()?;
+        channel.exec("docker container ls").ok()?;
         let mut s = String::new();
         let b = channel.read_to_string(&mut s).ok();
         // println!("{}", s);
@@ -272,8 +305,8 @@ async fn poll_server_status(client: &Client, sess: Session) -> ServerStatus {
             })
             .unwrap_or(ContainerStatus::Unknown);
 
-        let mut channel = sess.channel_session().unwrap();
-        channel.exec("docker exec root-mc-1 rcon-cli list").unwrap();
+        let mut channel = sess.channel_session().ok()?;
+        channel.exec("docker exec root-mc-1 rcon-cli list").ok()?;
         let mut s = String::new();
 
         channel.read_to_string(&mut s).ok();
@@ -291,11 +324,11 @@ async fn poll_server_status(client: &Client, sess: Session) -> ServerStatus {
         (ContainerStatus::NotUp, OnlinePeople::Unknown)
     };
 
-    ServerStatus {
+    Some(ServerStatus {
         host,
         container,
         online,
-    }
+    })
 }
 
 #[tokio::main]
@@ -309,19 +342,7 @@ async fn main() -> Result<(), Ec2Error> {
         .with(tracing_subscriber::fmt::layer())
         .init();
 
-    let tcp = TcpStream::connect("mc.siyuanyan.net:22").unwrap();
-    let mut sess = Session::new().unwrap();
-    sess.set_tcp_stream(tcp);
-    sess.handshake().unwrap();
-    sess.userauth_pubkey_file(
-        "root",
-        None,
-        dotenv::var("PRIVATE_KEY").unwrap().as_ref(),
-        None,
-    )
-    .unwrap();
-    sess.set_keepalive(false, 50);
-    assert!(sess.authenticated());
+
 
     // let auth = RequireAuthorizationLayer::bearer("elfiscute");
 
@@ -348,7 +369,9 @@ async fn main() -> Result<(), Ec2Error> {
 
                 while con_count.lock().await.gt(&0) {
                     tracing::trace!("polling the server");
-                    let status = poll_server_status(&poll_client, sess.clone()).await;
+                    let status = poll_server_status(&poll_client).await.unwrap_or(ServerStatus{
+                        host: "unknown".to_string(), container: ContainerStatus::Unknown, online: OnlinePeople::Unknown
+                    });
                     tx.send(Some(status)).ok();
                     tokio::time::sleep(Duration::from_secs(5)).await;
                 }

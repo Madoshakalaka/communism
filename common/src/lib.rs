@@ -22,7 +22,7 @@ pub enum ClientOpt {
 
 
 // reference output of `sudo docker-compose up -d`
-//
+// (lol those are aligned spaces not tabs)
 // CONTAINER ID   IMAGE                   COMMAND    CREATED       STATUS                            PORTS                                                      NAMES
 // 93b4bc8169e5   itzg/minecraft-server   "/start"   3 hours ago   Up 6 seconds (health: starting)   0.0.0.0:25565->25565/tcp, :::25565->25565/tcp, 25575/tcp   mc_mc_1
 
@@ -41,6 +41,19 @@ pub enum OnlinePeople{
 }
 
 
+/// server talks in newspeak
+#[derive(Encode, Decode, PartialEq, Debug, Clone)]
+pub enum Newspeak{
+    AuthResult(AuthResult),
+    ServerStatus(ServerStatus),
+    Feedback(String)
+}
+
+#[derive(Encode, Decode, PartialEq, Debug, Clone)]
+pub enum AuthResult{
+    Goob,
+    Sus,
+}
 
 #[cfg(test)]
 mod tests {

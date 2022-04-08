@@ -1,0 +1,11 @@
+[Unit]
+Description=Service that watches and controls the minecraft server
+After=network.target
+[Install]
+WantedBy=multi-user.target
+[Service]
+Type=simple
+ExecStart=/opt/sentinel/sentinel
+WorkingDirectory=/opt/sentinel/
+Restart=always
+RestartSec=5

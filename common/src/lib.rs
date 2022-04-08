@@ -1,8 +1,7 @@
-use aws_sdk_ec2::model::InstanceStateName;
 use bincode::{Decode, Encode};
 
 
-#[derive(Encode, Decode, PartialEq, Debug)]
+#[derive(Encode, Decode, PartialEq, Debug, Clone)]
 pub struct ServerStatus {
     pub host: String,
     pub container: ContainerStatus,
@@ -27,15 +26,15 @@ pub enum ClientOpt {
 // CONTAINER ID   IMAGE                   COMMAND    CREATED       STATUS                            PORTS                                                      NAMES
 // 93b4bc8169e5   itzg/minecraft-server   "/start"   3 hours ago   Up 6 seconds (health: starting)   0.0.0.0:25565->25565/tcp, :::25565->25565/tcp, 25575/tcp   mc_mc_1
 
-#[derive(Encode, Decode, PartialEq, Debug)]
+#[derive(Clone,Encode, Decode, PartialEq, Debug)]
 pub enum ContainerStatus{
     Unknown,
     NotUp,
-    Up
+    Up(String)
 }
 
 
-#[derive(Encode, Decode, PartialEq, Debug)]
+#[derive(Encode, Decode, PartialEq, Debug, Clone)]
 pub enum OnlinePeople{
     Unknown,
     Known(String)

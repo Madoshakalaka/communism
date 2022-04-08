@@ -18,9 +18,17 @@ web-sys = { version = "0.3", features = [
     "HtmlInputElement"
 ] }
 serde = "1.0"
+bincode = "2.0.0-rc.1"
 yewdux = "0.7"
 yewdux-functional = "0.1.0"
 gloo-dialogs = "0.1"
 yew-router = "0.16"
-
+reqwasm = "0.5"
+futures = "0.3"
+gloo-timers = "0.2"
+gloo-console = "0.2"
+wasm-bindgen-futures = "0.4"
+common = {path = "../common"}
+tokio = {version = "1.17", features = ["sync"]}
+instant = { version = "0.1" , features = ["wasm-bindgen"]}
 

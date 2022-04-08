@@ -1,27 +1,43 @@
-use tokio::sync::watch::{Receiver, Sender};
-
 use aws_sdk_ec2::model::InstanceStateName;
 use aws_sdk_ec2::{Client, Error as Ec2Error};
+use axum::extract::ws::CloseFrame;
 use axum::handler::Handler;
-use axum::{extract::{
-    ws::{Message, WebSocket, WebSocketUpgrade},
-    TypedHeader,
-}, headers, http::StatusCode, response::IntoResponse, routing::{get, get_service, post}, Router, Extension};
+use axum::{
+    extract::{
+        ws::{Message, WebSocket, WebSocketUpgrade},
+        TypedHeader,
+    },
+    headers,
+    http::StatusCode,
+    response::IntoResponse,
+    routing::{get, get_service, post},
+    Extension, Router,
+};
+use common::{ClientOpt, ContainerStatus, OnlinePeople, ServerStatus};
+use futures::{
+    sink::SinkExt,
+    stream::{SplitSink, SplitStream, StreamExt},
+};
+use ssh2::Session;
+use std::borrow::{Borrow, BorrowMut};
 use std::env;
 use std::error::Error;
 use std::fmt::{Debug, Display, Formatter};
-use std::ops::Deref;
+use std::io::Read;
+use std::net::TcpStream;
+use std::ops::{AddAssign, Deref, SubAssign};
+use std::sync::Arc;
 use std::time::Duration;
-
-use common::{ClientOpt, ContainerStatus, OnlinePeople, ServerStatus};
+use tokio::sync::watch::{Receiver, Sender};
+use tokio::sync::{Mutex, Notify};
 use tower_http::auth::RequireAuthorizationLayer;
-
+use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
 
 macro_rules! send_to_instance {
     ($client:ident, $id:ident) => {
         $client
             .$id()
-            .set_instance_ids(Some(vec!["i-04b01cb5264a5c895".to_string()]))
+            .set_instance_ids(Some(vec!["i-04f77bba0b522dfbe".to_string()]))
             .send()
             .await
             .unwrap()
@@ -86,92 +102,194 @@ impl Error for TimeoutError {}
 async fn ws_handler(
     ws: WebSocketUpgrade,
     user_agent: Option<TypedHeader<headers::UserAgent>>,
-    Extension(rx): Extension<Receiver<Option<ServerStatus>>>
+    Extension(rx): Extension<Receiver<Option<ServerStatus>>>,
+    Extension(client): Extension<Client>,
+    Extension(con_notify): Extension<Arc<Notify>>,
+    Extension(con_count): Extension<Arc<Mutex<u16>>>,
 ) -> impl IntoResponse {
     if let Some(TypedHeader(user_agent)) = user_agent {
         println!("`{}` connected", user_agent.as_str());
     }
 
-    ws.on_upgrade(|socket: WebSocket| handle_socket(socket, rx))
+    ws.on_upgrade(|socket: WebSocket| handle_socket(socket, rx, client, con_count, con_notify))
 }
-async fn handle_socket(mut socket: WebSocket, mut rx: Receiver<Option<ServerStatus>>) {
+async fn handle_socket(
+    socket: WebSocket,
+    mut rx: Receiver<Option<ServerStatus>>,
+    client: Client,
+    con_count: Arc<Mutex<u16>>,
+    con_notify: Arc<Notify>,
+) {
+    let (mut sender, mut receiver) = socket.split();
 
+    con_notify.notify_one();
+
+    {
+        let mut con = con_count.lock().await;
+        let con = con.borrow_mut();
+        con.add_assign(1);
+    }
+    let sender = Arc::new(Mutex::new(sender));
 
     let config = bincode::config::standard();
 
     let broadcast_status = async {
-
-        loop{
+        loop {
             rx.changed().await.ok();
-            rx.borrow_and_update()
-                .as_ref()
-                .map(|ServerStatus{ host, container, online }|{
-                // todo: send via websocket
-            })
+            let s = rx.borrow_and_update().as_ref().cloned();
+            if let Some(s) = s {
+                if let Ok(s) = bincode::encode_to_vec(s, config) {
+                    let send_result = {
+                        let mut sender = sender.lock().await;
+                        let sender = sender.borrow_mut();
+                        sender.send(Message::Binary(s)).await
+                    };
 
-
-
-        }
-
-
-
-
-
-    };
-
-
-    while let Some(msg) = socket.recv().await {
-        if let Ok(msg) = msg {
-            match msg {
-                Message::Text(_) => {
-                    // println!("client send str: {:?}", t);
-                }
-                Message::Binary(d) => {
-                    if let Ok((decoded, _)) = bincode::decode_from_slice::<ClientOpt, _>(d.as_slice(), config){
-
-
+                    if send_result.is_err() {
+                        // client disconnected
+                        return;
                     }
                 }
-                Message::Ping(_) => {
-                    println!("socket ping");
-                }
-                Message::Pong(_) => {
-                    println!("socket pong");
-                }
-                Message::Close(_) => {
-                    println!("client disconnected");
-                    return;
-                }
             }
-        } else {
-            println!("client disconnected");
-            return;
         }
-    }
+    };
 
-    loop {
-        if socket
-            .send(Message::Text(String::from("Hi!")))
-            .await
-            .is_err()
-        {
-            println!("client disconnected");
-            return;
+    let receive_commands = async {
+        'outer: loop {
+            if let Some(Ok(m)) = receiver.next().await {
+                match m {
+                    Message::Text(p) => {
+                        if p == dotenv::var("PASSWORD").unwrap() {
+                            break 'outer;
+                        }
+                    }
+                    Message::Close(_) => return,
+                    _ => {}
+                }
+            } else {
+                return;
+            }
         }
-        tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+
+        while let Some(msg) = receiver.next().await {
+            if let Ok(msg) = msg {
+                match msg {
+                    Message::Text(_) => {
+                        // println!("client send str: {:?}", t);
+                    }
+                    Message::Binary(d) => {
+                        if let Ok((decoded, _)) =
+                            bincode::decode_from_slice::<ClientOpt, _>(d.as_slice(), config)
+                        {
+                            match decoded {
+                                ClientOpt::On => {
+                                    send_to_instance!(client, start_instances);
+                                }
+                                ClientOpt::Off => {
+                                    send_to_instance!(client, start_instances);
+                                }
+                                ClientOpt::Reboot => {
+                                    send_to_instance!(client, reboot_instances);
+                                }
+                            }
+                        }
+                    }
+                    Message::Ping(_) => {
+                        // println!("socket ping");
+                    }
+                    Message::Pong(_) => {
+                        // println!("socket pong");
+                    }
+                    Message::Close(_) => {
+                        // println!("client disconnected");
+                        return;
+                    }
+                }
+            } else {
+                // println!("client disconnected");
+                return;
+            }
+        }
+    };
+
+    tokio::select!(
+        _ = broadcast_status => {
+
+        }
+        _ = receive_commands => {
+
+        }
+    );
+
+    let send_result = {
+        let mut sender = sender.lock().await;
+        let sender = sender.borrow_mut();
+        sender.send(Message::Close(None)).await
+    };
+    send_result.ok();
+    {
+        let mut con = con_count.lock().await;
+        let con = con.borrow_mut();
+        con.sub_assign(1);
     }
 }
 
-async fn poll_server_status(client: &Client) -> ServerStatus {
+async fn poll_server_status(client: &Client, sess: Session) -> ServerStatus {
     let host = show_state(&client)
         .await
-        .map_or("failed to get instance state".to_string(), |n| n.as_str().to_string());
+        .map_or("failed to get instance state".to_string(), |n| {
+            n.as_str().to_string()
+        });
 
-    // todo:
-    let container = ContainerStatus::Unknown;
+    let (container, online) = if host.contains("running") {
+        let mut channel = sess.channel_session().unwrap();
+        channel.exec("docker container ls").unwrap();
+        let mut s = String::new();
+        let b = channel.read_to_string(&mut s).ok();
+        // println!("{}", s);
+        channel.wait_close();
+        // println!("{}", channel.exit_status() .unwrap());
+        let container = b
+            .map(|_| {
+                let mut s = s.trim().split('\n');
 
-    // todo:
-    let online = OnlinePeople::Unknown;
+                let cell_bounds = s.next().map(|x| (x.find("STATUS"), x.find("PORTS")));
+
+                cell_bounds
+                    .and_then(|lr| {
+                        if let (Some(l), Some(r)) = lr {
+                            Some((l, r))
+                        } else {
+                            None
+                        }
+                    })
+                    .map(|(l, r)| {
+                        s.next()
+                            .map(|x| ContainerStatus::Up((&x[l..r]).to_string()))
+                            .unwrap_or(ContainerStatus::NotUp)
+                    })
+                    .unwrap_or(ContainerStatus::Unknown)
+            })
+            .unwrap_or(ContainerStatus::Unknown);
+
+        let mut channel = sess.channel_session().unwrap();
+        channel.exec("docker exec root-mc-1 rcon-cli list").unwrap();
+        let mut s = String::new();
+
+        channel.read_to_string(&mut s).ok();
+        // println!("{}", s);
+        channel.wait_close().ok();
+        // println!("{}", channel.exit_status() .unwrap());
+        let online = strip_ansi_escapes::strip(s)
+            .ok()
+            .and_then(|x| String::from_utf8(x).ok())
+            .map(OnlinePeople::Known)
+            .unwrap_or(OnlinePeople::Unknown);
+
+        (container, online)
+    } else {
+        (ContainerStatus::NotUp, OnlinePeople::Unknown)
+    };
 
     ServerStatus {
         host,
@@ -184,34 +302,71 @@ async fn poll_server_status(client: &Client) -> ServerStatus {
 async fn main() -> Result<(), Ec2Error> {
     dotenv::dotenv().ok();
 
-    let auth = RequireAuthorizationLayer::bearer("elfiscute");
+    tracing_subscriber::registry()
+        .with(EnvFilter::new(
+            std::env::var("RUST_LOG").unwrap_or_else(|_| "sentinel=trace".into()),
+        ))
+        .with(tracing_subscriber::fmt::layer())
+        .init();
+
+    let tcp = TcpStream::connect("mc.siyuanyan.net:22").unwrap();
+    let mut sess = Session::new().unwrap();
+    sess.set_tcp_stream(tcp);
+    sess.handshake().unwrap();
+    sess.userauth_pubkey_file(
+        "root",
+        None,
+        dotenv::var("PRIVATE_KEY").unwrap().as_ref(),
+        None,
+    )
+    .unwrap();
+    sess.set_keepalive(false, 50);
+    assert!(sess.authenticated());
+
+    // let auth = RequireAuthorizationLayer::bearer("elfiscute");
 
     let (tx, rx) = tokio::sync::watch::channel::<Option<ServerStatus>>(None);
 
     // todo: handle log streaming. Can't be done with watch because no log must be lost.
 
-    let endless_poll = async {
-        // ap-east-1 is Hong Kong
-        let shared_config = aws_config::from_env().region("ap-east-1").load().await;
+    // ap-east-1 is Hong Kong
+    let shared_config = aws_config::from_env().region("ap-east-1").load().await;
 
-        let client = Client::new(&shared_config);
+    let con_notify = Arc::new(tokio::sync::Notify::new());
+    let con_count = Arc::new(Mutex::new(0u16));
 
-        loop {
-            tokio::time::sleep(Duration::from_secs(5)).await;
-            let status = poll_server_status(&client).await;
-            tx.send(Some(status));
+    let client = Client::new(&shared_config);
+
+    let poll_client = client.clone();
+    let endless_poll = {
+        let con_count = con_count.clone();
+        let con_notify = con_notify.clone();
+        async move {
+            loop {
+                tracing::info!("waiting for connection to start polling server");
+                con_notify.notified().await;
+
+                while con_count.lock().await.gt(&0) {
+                    tracing::trace!("polling the server");
+                    let status = poll_server_status(&poll_client, sess.clone()).await;
+                    tx.send(Some(status)).ok();
+                    tokio::time::sleep(Duration::from_secs(5)).await;
+                }
+                tracing::info!("no websocket connection remains");
+            }
         }
     };
 
     let ws_router = Router::new()
         .route("/", get(ws_handler))
-        .layer(Extension(rx));
+        .layer(Extension(rx))
+        .layer(Extension(client))
+        .layer(Extension(con_count))
+        .layer(Extension(con_notify));
 
-
-    let app = Router::new()
-        .nest("/ws", ws_router)
-        .route("/auth", post(|| async { StatusCode::OK }))
-        .layer(auth);
+    let app = Router::new().nest("/ws", ws_router);
+    // .route("/auth", post(|| async { StatusCode::OK }))
+    // .layer(auth);
 
     // run it with hyper on localhost:3000
     let server =

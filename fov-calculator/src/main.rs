@@ -20,10 +20,7 @@ macro_rules! use_style {
 
 #[styled_component(App)]
 pub fn app() -> Html {
-
-
     let tip_list = use_style!("padding-left: 0;");
-
 
     fragment()
         .child(h1("Minecraft FOV Calculator - Kill Motion Sickness"))
@@ -51,7 +48,6 @@ pub fn app() -> Html {
             )
         )
         .into()
-
 }
 
 #[derive(PartialEq, Serialize, Deserialize, Clone, Copy)]
@@ -322,9 +318,7 @@ pub fn fov_calc() -> Html {
 
     let right_margin = use_style!("margin-right: 2rem;");
 
-    result = if let (Some(height), Some(distance)) =
-        (height.state(), distance.state())
-    {
+    result = if let (Some(height), Some(distance)) = (height.state(), distance.state()) {
         #[cfg(debug_assertions)]
         log::debug!("computing result");
 

@@ -1,19 +1,17 @@
-use std::path::Path;
 use anyhow::Result;
 use aws_sdk_s3::model::{Delete, Object, ObjectIdentifier};
 use aws_sdk_s3::types::ByteStream;
 use aws_sdk_s3::Client;
+use std::path::Path;
 
 use futures::FutureExt;
 use tokio::fs::File;
 use tokio::process::Command;
 
-use walkdir::WalkDir;
 use crate::StreamExt;
-
+use walkdir::WalkDir;
 
 async fn list_old_assets(client: &Client, cf_prefix: &str, yew_crate_name: &str) -> Vec<String> {
-
     let objects = client
         .list_objects_v2()
         .bucket("siyuanyan")
@@ -22,41 +20,35 @@ async fn list_old_assets(client: &Client, cf_prefix: &str, yew_crate_name: &str)
         .await
         .unwrap();
 
-    let keys = objects.contents.unwrap_or_default()
+    let keys = objects
+        .contents
+        .unwrap_or_default()
         .into_iter()
-        .filter_map(|Object{key,..}|{
-            key
-        })
-        .map(
-            |k| (k, client.clone())
-        );
+        .filter_map(|Object { key, .. }| key)
+        .map(|k| (k, client.clone()));
 
     let keys = futures::stream::iter(keys);
 
-    keys.filter_map(|(k,c)|async move {
-
-        let params = c.head_object()
+    keys.filter_map(|(k, c)| async move {
+        let params = c
+            .head_object()
             .bucket("siyuanyan")
             .key(&k)
-            .send().await.unwrap();
-        if let Some(remote_crate_name) = params.metadata.unwrap_or_default().get("yew-crate"){
+            .send()
+            .await
+            .unwrap();
+        if let Some(remote_crate_name) = params.metadata.unwrap_or_default().get("yew-crate") {
             if remote_crate_name == yew_crate_name {
                 Some(k)
-            }else{
+            } else {
                 None
             }
-        }else{
+        } else {
             None
         }
     })
-
-
-        .collect()
-        .await
-
-
-
-
+    .collect()
+    .await
 }
 
 /// `cf_prefix`: no starting slash, no ending slash
@@ -84,16 +76,13 @@ pub async fn deploy<P: AsRef<Path>>(cf_prefix: &str, yew_crate: P) -> Result<()>
 
     let compression = crate::gzip_release_dir(yew_crate.as_ref().join("dist/release/uncompressed"));
 
-    println!(
-        "building distribution and listing old assets from the bucket"
-    );
+    println!("building distribution and listing old assets from the bucket");
     let (trunk_build_output, old_objects) = tokio::join!(
         trunk,
         list_old_assets(&client, cf_prefix, &yew_crate_name).then(|x| async {
             println!("\tfinished listing old objects");
             x
         }),
-
     );
 
     if !trunk_build_output.status.success() {
@@ -143,17 +132,13 @@ pub async fn deploy<P: AsRef<Path>>(cf_prefix: &str, yew_crate: P) -> Result<()>
                 let put = client
                     .put_object()
                     .bucket("siyuanyan")
-                    .key(format!(
-                        "website-assets/{cf_prefix}/{file_name}"
-                    ))
+                    .key(format!("website-assets/{cf_prefix}/{file_name}"))
                     .metadata("yew-crate", yew_crate_name.clone())
                     .body(body);
                 let put = if file_name.ends_with(".js") {
-                    put.content_type("text/javascript")
-                        .content_encoding("br")
+                    put.content_type("text/javascript").content_encoding("br")
                 } else if file_name.ends_with(".wasm") {
-                    put.content_type("application/wasm")
-                        .content_encoding("br")
+                    put.content_type("application/wasm").content_encoding("br")
                 } else {
                     put
                 };
@@ -164,7 +149,11 @@ pub async fn deploy<P: AsRef<Path>>(cf_prefix: &str, yew_crate: P) -> Result<()>
     };
 
     let scp = Command::new("scp")
-        .arg(yew_crate.as_ref().join("dist/release/uncompressed/index.html"))
+        .arg(
+            yew_crate
+                .as_ref()
+                .join("dist/release/uncompressed/index.html"),
+        )
         .arg(format!("root@xray:/site/{cf_prefix}/index.html"))
         .output();
 
@@ -173,15 +162,12 @@ pub async fn deploy<P: AsRef<Path>>(cf_prefix: &str, yew_crate: P) -> Result<()>
     println!("compression and uploading objects to S3");
     println!("uploading index.html to the backend");
     let (s3, scp) = tokio::join!(
-
-        remove
-        .then(|_| compression)
-        .then(|r| async move {
+        remove.then(|_| compression).then(|r| async move {
             print!("{r}");
             upload_to_s3.await
-        })
-
-        , scp);
+        }),
+        scp
+    );
 
     print!("{s3}");
 

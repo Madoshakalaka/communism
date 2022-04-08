@@ -1,37 +1,32 @@
 use aws_sdk_ec2::model::InstanceStateName;
 use aws_sdk_ec2::{Client, Error as Ec2Error};
-use axum::extract::ws::CloseFrame;
-use axum::handler::Handler;
+
 use axum::{
     extract::{
         ws::{Message, WebSocket, WebSocketUpgrade},
         TypedHeader,
     },
     headers,
-    http::StatusCode,
     response::IntoResponse,
-    routing::{get, get_service, post},
+    routing::get,
     Extension, Router,
 };
 use common::{AuthResult, ClientOpt, ContainerStatus, Newspeak, OnlinePeople, ServerStatus};
-use futures::{
-    sink::SinkExt,
-    stream::{SplitSink, SplitStream, StreamExt},
-};
+use futures::{sink::SinkExt, stream::StreamExt};
 use ssh2::Session;
-use std::borrow::{Borrow, BorrowMut};
-use std::env;
+use std::borrow::BorrowMut;
+
 use std::error::Error;
 use std::fmt::{Debug, Display, Formatter};
 use std::io::Read;
 use std::net::{IpAddr, SocketAddr, TcpStream};
-use std::ops::{AddAssign, Deref, SubAssign};
+use std::ops::{AddAssign, SubAssign};
 use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::sync::watch::{Receiver, Sender};
+use tokio::sync::watch::Receiver;
 use tokio::sync::{Mutex, Notify};
-use tower_http::auth::RequireAuthorizationLayer;
+
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
 
 macro_rules! send_to_instance {
@@ -121,7 +116,7 @@ async fn handle_socket(
     con_count: Arc<Mutex<u16>>,
     con_notify: Arc<Notify>,
 ) {
-    let (mut sender, mut receiver) = socket.split();
+    let (sender, mut receiver) = socket.split();
 
     con_notify.notify_one();
 
@@ -133,7 +128,6 @@ async fn handle_socket(
     let sender = Arc::new(Mutex::new(sender));
 
     let config = bincode::config::standard();
-
 
     let broadcast_status = {
         let sender = sender.clone();
@@ -167,9 +161,20 @@ async fn handle_socket(
                     Message::Text(p) => {
                         if p == dotenv::var("PASSWORD").unwrap() {
                             break 'outer;
-                        }else{
+                        } else {
                             tracing::info!("wrong password received");
-                            sender.lock().await.send(Message::Binary(bincode::encode_to_vec(Newspeak::AuthResult(AuthResult::Sus), config).unwrap())).await.ok();
+                            sender
+                                .lock()
+                                .await
+                                .send(Message::Binary(
+                                    bincode::encode_to_vec(
+                                        Newspeak::AuthResult(AuthResult::Sus),
+                                        config,
+                                    )
+                                    .unwrap(),
+                                ))
+                                .await
+                                .ok();
                         }
                     }
                     Message::Close(_) => return,
@@ -181,7 +186,14 @@ async fn handle_socket(
         }
 
         tracing::info!("a client authenticated");
-        sender.lock().await.send(Message::Binary(bincode::encode_to_vec(Newspeak::AuthResult(AuthResult::Goob), config).unwrap())).await.ok();
+        sender
+            .lock()
+            .await
+            .send(Message::Binary(
+                bincode::encode_to_vec(Newspeak::AuthResult(AuthResult::Goob), config).unwrap(),
+            ))
+            .await
+            .ok();
 
         while let Some(msg) = receiver.next().await {
             if let Ok(msg) = msg {
@@ -254,16 +266,18 @@ async fn handle_socket(
 }
 
 async fn poll_server_status(client: &Client) -> Option<ServerStatus> {
-    let host = show_state(&client)
+    let host = show_state(client)
         .await
         .map_or("failed to get instance state".to_string(), |n| {
             n.as_str().to_string()
         });
 
-
     let (container, online) = if host.contains("running") {
-        let addr = SocketAddr::new(IpAddr::from_str(&dotenv::var("MC_HOST").unwrap()).unwrap(), 22);
-        let tcp = TcpStream::connect_timeout(&addr,Duration::from_secs(3)).ok()?;
+        let addr = SocketAddr::new(
+            IpAddr::from_str(&dotenv::var("MC_HOST").unwrap()).unwrap(),
+            22,
+        );
+        let tcp = TcpStream::connect_timeout(&addr, Duration::from_secs(3)).ok()?;
         let mut sess = Session::new().unwrap();
         sess.set_tcp_stream(tcp);
         sess.handshake().unwrap();
@@ -273,14 +287,14 @@ async fn poll_server_status(client: &Client) -> Option<ServerStatus> {
             dotenv::var("PRIVATE_KEY").unwrap().as_ref(),
             None,
         )
-            .unwrap();
+        .unwrap();
         sess.set_keepalive(false, 40);
         let mut channel = sess.channel_session().ok()?;
         channel.exec("docker container ls").ok()?;
         let mut s = String::new();
         let b = channel.read_to_string(&mut s).ok();
         // println!("{}", s);
-        channel.wait_close();
+        channel.wait_close().ok();
         // println!("{}", channel.exit_status() .unwrap());
         let container = b
             .map(|_| {
@@ -342,8 +356,6 @@ async fn main() -> Result<(), Ec2Error> {
         .with(tracing_subscriber::fmt::layer())
         .init();
 
-
-
     // let auth = RequireAuthorizationLayer::bearer("elfiscute");
 
     let (tx, rx) = tokio::sync::watch::channel::<Option<ServerStatus>>(None);
@@ -369,9 +381,13 @@ async fn main() -> Result<(), Ec2Error> {
 
                 while con_count.lock().await.gt(&0) {
                     tracing::trace!("polling the server");
-                    let status = poll_server_status(&poll_client).await.unwrap_or(ServerStatus{
-                        host: "unknown".to_string(), container: ContainerStatus::Unknown, online: OnlinePeople::Unknown
-                    });
+                    let status = poll_server_status(&poll_client)
+                        .await
+                        .unwrap_or(ServerStatus {
+                            host: "unknown".to_string(),
+                            container: ContainerStatus::Unknown,
+                            online: OnlinePeople::Unknown,
+                        });
                     tx.send(Some(status)).ok();
                     tokio::time::sleep(Duration::from_secs(5)).await;
                 }

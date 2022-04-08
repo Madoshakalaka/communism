@@ -1,40 +1,39 @@
-use web_sys::HtmlButtonElement;
-use console::interop::{show_congrats_toast, Toast};
-use crate::WsStatus::Created;
 use common::{AuthResult, ClientOpt, ContainerStatus, Newspeak, OnlinePeople, ServerStatus};
+use console::interop::show_congrats_toast;
+use console::interop::ResourceProvider;
 use futures::stream::{SplitSink, SplitStream};
 use futures::{SinkExt, StreamExt};
 use gloo_timers::callback::Timeout;
 use gloo_timers::future::TimeoutFuture;
 use instant::Instant;
 use reqwasm::websocket::futures::WebSocket;
-use reqwasm::websocket::{Message, State};
+use reqwasm::websocket::Message;
 use serde::{Deserialize, Serialize};
-use std::borrow::{Borrow, BorrowMut, Cow};
+use std::borrow::Cow;
 use std::ops::Deref;
-use std::ops::DerefMut;
+
 use std::rc::Rc;
-use std::sync::{Arc, RwLock};
 use std::sync::Mutex;
-use std::time::Duration;
+use std::sync::RwLock;
+
 use stylist::yew::styled_component;
-use stylist::{Style, StyleSource};
-use web_sys::{HtmlInputElement, HtmlSelectElement};
+
+use web_sys::HtmlButtonElement;
+use web_sys::HtmlInputElement;
 use yew::prelude::*;
-use yew::virtual_dom::AttrValue;
+
 use yew_vdom_gen::prelude::*;
 use yewdux::prelude::*;
 use yewdux_functional::*;
-use console::interop::ResourceProvider;
 
-macro_rules! use_style {
-    ($a: tt) => {{
-        let style = stylist::yew::use_style!($a);
-        let style = style.get_class_name().to_owned();
-        let attr_val: AttrValue = style.into();
-        attr_val
-    }};
-}
+// macro_rules! use_style {
+//     ($a: tt) => {{
+//         let style = stylist::yew::use_style!($a);
+//         let style = style.get_class_name().to_owned();
+//         let attr_val: AttrValue = style.into();
+//         attr_val
+//     }};
+// }
 
 #[derive(Clone, Serialize, Deserialize, Default)]
 struct Password(String);
@@ -46,52 +45,8 @@ enum AutoSignStatus {
     Tried,
 }
 
-enum WsStatus {
-    NotCreated,
-    Connecting,
-    Created(WebSocket),
-}
-
-enum WsAction {
-    Connect,
-    Created(WebSocket),
-    Closed,
-}
-
-impl WsStatus {
-    async fn next(&mut self) -> Option<ServerStatus> {
-        match self {
-            WsStatus::NotCreated => None,
-            WsStatus::Connecting => None,
-            Created(s) => {
-                let config = bincode::config::standard();
-                let next = s.next().await;
-                if let Message::Bytes(b) = next.transpose().ok()?? {
-                    let (d, _) = bincode::decode_from_slice(b.as_slice(), config).ok()?;
-                    d
-                } else {
-                    None
-                }
-            }
-        }
-    }
-}
-
-impl Reducible for WsStatus {
-    type Action = WsAction;
-
-    fn reduce(self: Rc<Self>, action: Self::Action) -> Rc<Self> {
-        match action {
-            WsAction::Connect => Rc::new(Self::Connecting),
-            WsAction::Created(s) => Rc::new(Created(s)),
-            WsAction::Closed => Rc::new(Self::NotCreated),
-        }
-    }
-}
-
 #[styled_component(App)]
 pub fn app() -> Html {
-
     let toast_ready = console::interop::use_toast();
 
     let server_status: UseStateHandle<Option<(ServerStatus, Instant)>> = use_state(|| None);
@@ -106,10 +61,12 @@ pub fn app() -> Html {
     };
 
     // let open_soc = use_ref(||Arc::new(Mutex::new(WebSocket::open(socket).ok())));
-    let open_soc = use_ref(|| RwLock::new(WebSocket::open(socket).ok().map(|x|{
-        let (write, read)  = x.split();
-        (Mutex::new(write), Mutex::new(read))
-    })));
+    let open_soc = use_ref(|| {
+        RwLock::new(WebSocket::open(socket).ok().map(|x| {
+            let (write, read) = x.split();
+            (Mutex::new(write), Mutex::new(read))
+        }))
+    });
 
     let re_render = use_state(|| ());
 
@@ -137,51 +94,52 @@ pub fn app() -> Html {
                 {
                     let g = open_soc_report.deref().read().unwrap();
                     {
-
                         let mut t = g.as_ref().map(|(_, g)| g.lock().unwrap());
                         match t.as_deref_mut() {
                             Some(ws) => {
                                 while let Some(Ok(Message::Bytes(b))) = ws.next().await {
+                                    let n: Option<(Newspeak, _)> =
+                                        bincode::decode_from_slice(b.as_slice(), config)
+                                            .map_err(|e| {
+                                                gloo_console::warn!(e.to_string());
+                                            })
+                                            .ok();
 
-                                    let n: Option<(Newspeak, _)> = bincode::decode_from_slice(b.as_slice(), config).map_err(|e|{
-                                        gloo_console::warn!(e.to_string());
-                                    })
-                                        .ok();
-
-                                    match n{
+                                    match n {
                                         None => {}
                                         Some((n, _)) => {
-                                            match n{
-                                                Newspeak::AuthResult(r) => {
-                                                    match r{
-                                                        AuthResult::Goob => {
-                                                            let input_ref = input_ref.clone();
-                                                            password_dispatch.reduce(move |x: & mut Password|{
-
-                                                                let ele: HtmlInputElement = input_ref.cast().unwrap();
+                                            match n {
+                                                Newspeak::AuthResult(r) => match r {
+                                                    AuthResult::Goob => {
+                                                        let input_ref = input_ref.clone();
+                                                        password_dispatch.reduce(
+                                                            move |x: &mut Password| {
+                                                                let ele: HtmlInputElement =
+                                                                    input_ref.cast().unwrap();
                                                                 let val = ele.value();
-                                                                if ! val.is_empty(){
+                                                                if !val.is_empty() {
                                                                     x.0 = val;
                                                                 };
+                                                            },
+                                                        );
 
-                                                            });
-
-                                                            authenticating.set(false);
-                                                            authenticated.set(true);
-                                                            console::interop::show_congrats_toast("welcome, fellow equal member of communism");
-                                                        }
-                                                        AuthResult::Sus => {
-                                                            authenticating.set(false);
-                                                            authenticated.set(false);
-                                                            console::interop::show_execution_toast("sus, go ask Matt");
-                                                        }
+                                                        authenticating.set(false);
+                                                        authenticated.set(true);
+                                                        console::interop::show_congrats_toast("welcome, fellow equal member of communism");
                                                     }
-
-                                                }
+                                                    AuthResult::Sus => {
+                                                        authenticating.set(false);
+                                                        authenticated.set(false);
+                                                        console::interop::show_execution_toast(
+                                                            "sus, go ask Matt",
+                                                        );
+                                                    }
+                                                },
                                                 Newspeak::ServerStatus(s) => {
                                                     // #[cfg(debug_assertions)]
                                                     // log::debug!("received server status");
-                                                    reporting_server_status.set(Some((s, Instant::now())));
+                                                    reporting_server_status
+                                                        .set(Some((s, Instant::now())));
                                                 }
                                                 Newspeak::Feedback(f) => {
                                                     show_congrats_toast(&f);
@@ -190,7 +148,6 @@ pub fn app() -> Html {
                                         }
                                     };
                                 }
-
                             }
                             None => {}
                         }
@@ -203,7 +160,7 @@ pub fn app() -> Html {
                 {
                     let mut g = open_soc_report.deref().write().unwrap();
                     WebSocket::open(socket).ok().map(|s| {
-                        let (write, read)  = s.split();
+                        let (write, read) = s.split();
                         g.replace((Mutex::new(write), Mutex::new(read)))
                     });
                 }
@@ -281,31 +238,33 @@ pub fn app() -> Html {
         wasm_bindgen_futures::spawn_local(interval_refresh);
     });
 
-
-
     let auto_sign = use_state(|| AutoSignStatus::NotTried);
-
 
     let stored_password = password.state().cloned().unwrap_or_default().0.clone();
 
-
     {
-        let stored_password = stored_password.clone();
+        let stored_password = stored_password;
 
-        if matches!(*auto_sign, AutoSignStatus::NotTried) && !stored_password.is_empty() && toast_ready {
+        if matches!(*auto_sign, AutoSignStatus::NotTried)
+            && !stored_password.is_empty()
+            && toast_ready
+        {
             let open_soc = open_soc.clone();
             let authenticating = authenticating.clone();
             let auto_sign = auto_sign.clone();
             auto_sign.set(AutoSignStatus::Trying);
             wasm_bindgen_futures::spawn_local(async move {
-
                 let soc = open_soc.deref().read().unwrap();
 
-                match soc.as_ref(){
+                match soc.as_ref() {
                     None => {}
                     Some((s, _)) => {
                         authenticating.set(true);
-                        s.lock().unwrap().send(Message::Text(stored_password)).await.ok();
+                        s.lock()
+                            .unwrap()
+                            .send(Message::Text(stored_password))
+                            .await
+                            .ok();
                     }
                 }
                 auto_sign.set(AutoSignStatus::Tried);
@@ -313,81 +272,55 @@ pub fn app() -> Html {
         }
     }
 
+    let password_label = label("The password? (Ask Matt)").child({
+        let input_ref = input_ref.clone();
+        html! {<input type="password" ref={input_ref} autocomplete="true"/>}
+    });
 
-
-
-
-    let password_label = label("The password? (Ask Matt)").child(
-        {
-            let input_ref = input_ref.clone();
-            html!{<input type="password" ref={input_ref} autocomplete="true"/>}
-        }
-        );
-
-    let button_waiting: bool = {
-        ! toast_ready  || matches!(*auto_sign, AutoSignStatus::Trying) || *authenticating
-    };
+    let button_waiting: bool =
+        { !toast_ready || matches!(*auto_sign, AutoSignStatus::Trying) || *authenticating };
 
     let status_display = (*server_status)
         .as_ref()
-        .map(|(ServerStatus{host, container, online}, i)|{
-            fragment()
-                .child(h1("Host Status"))
-                .child(p(host.clone()))
-                .child(h1("Container Status"))
-                .child(
-                    p(
-                        match container {
-                            ContainerStatus::Unknown =>{
-                                Cow::from("unknown")
-                            }
-                            ContainerStatus::Up(s) => Cow::from(s.clone()),
-                            ContainerStatus::NotUp => Cow::from("not up"),
-                        }
-                    )
-                )
-                .child(h1("Online People"))
-                .child(
-                    p(
-                        match online  {
-                            OnlinePeople::Unknown =>{
-                                Cow::from("unknown")
-                            }
-                            OnlinePeople::Known(s) => Cow::from(s.clone()),
-                        }
-                    )
-                )
-                .child(hr())
-                .child(
-                    p(
-                        Cow::from(format!(
-                            "last update: {}s ago",
-                            i.elapsed().as_secs()
-                        ))
-                    )
-                )
-        })
-        .unwrap_or_else(||
-
-            {
-                // #[cfg(debug_assertions)]
-                // log::debug!("render: status is None");
+        .map(
+            |(
+                ServerStatus {
+                    host,
+                    container,
+                    online,
+                },
+                i,
+            )| {
                 fragment()
-                    .child(
-                        p("receiving from sentinel...")
-                    )
-            }
+                    .child(h1("Host Status"))
+                    .child(p(host.clone()))
+                    .child(h1("Container Status"))
+                    .child(p(match container {
+                        ContainerStatus::Unknown => Cow::from("unknown"),
+                        ContainerStatus::Up(s) => Cow::from(s.clone()),
+                        ContainerStatus::NotUp => Cow::from("not up"),
+                    }))
+                    .child(h1("Online People"))
+                    .child(p(match online {
+                        OnlinePeople::Unknown => Cow::from("unknown"),
+                        OnlinePeople::Known(s) => Cow::from(s.clone()),
+                    }))
+                    .child(hr())
+                    .child(p(Cow::from(format!(
+                        "last update: {}s ago",
+                        i.elapsed().as_secs()
+                    ))))
+            },
+        )
+        .unwrap_or_else(|| {
+            // #[cfg(debug_assertions)]
+            // log::debug!("render: status is None");
+            fragment().child(p("receiving from sentinel..."))
+        });
 
-        );
-
-    let frag = fragment()
-        .child(h1("'Chung' Minecraft Server Dashboard"));
+    let frag = fragment().child(h1("'Chung' Minecraft Server Dashboard"));
 
     let frag = if *authenticated {
-
-
-
-
         frag
     } else {
         let submit_button = {
@@ -406,7 +339,9 @@ pub fn app() -> Html {
         let password_form = {
             let authenticating = authenticating.clone();
             let open_soc = open_soc.clone();
-            form().child(password_label).child(submit_button)
+            form()
+                .child(password_label)
+                .child(submit_button)
                 .listener(on_submit(move |e| {
                     e.prevent_default();
                     #[cfg(debug_assertions)]
@@ -415,120 +350,136 @@ pub fn app() -> Html {
                     let open_soc = open_soc.clone();
                     let authenticating = authenticating.clone();
                     wasm_bindgen_futures::spawn_local(async move {
-
                         let soc = open_soc.deref().read().unwrap();
 
-                        match soc.as_ref(){
+                        match soc.as_ref() {
                             None => {}
                             Some((s, _)) => {
                                 authenticating.set(true);
-                                s.lock().unwrap().send(Message::Text(input_ref.cast::<HtmlInputElement>().unwrap().value())).await.ok();
+                                s.lock()
+                                    .unwrap()
+                                    .send(Message::Text(
+                                        input_ref.cast::<HtmlInputElement>().unwrap().value(),
+                                    ))
+                                    .await
+                                    .ok();
                             }
                         }
                     });
-
                 }))
-
         };
 
-        frag
-            .child(password_form)
+        frag.child(password_form)
     };
 
+    let is_running_or_closed = server_status
+        .deref()
+        .as_ref()
+        .map(|(ServerStatus { host, .. }, _)| (host.contains("running"), host.contains("stopped")));
 
-    let is_running_or_closed = server_status.deref().as_ref().map(|(ServerStatus{host, ..}, _)|{
-        (host.contains("running"),
-         host.contains("stopped")
-        )
-    });
-
-
-    let send_opt =  |opt: ClientOpt, open_soc: Rc<RwLock<Option<(Mutex<SplitSink<WebSocket, Message>>, Mutex<SplitStream<WebSocket>>)>>>, authenticating: UseStateHandle<bool>| {
-        wasm_bindgen_futures::spawn_local(async move{
+    let send_opt = |opt: ClientOpt,
+                    open_soc: Rc<
+        RwLock<
+            Option<(
+                Mutex<SplitSink<WebSocket, Message>>,
+                Mutex<SplitStream<WebSocket>>,
+            )>,
+        >,
+    >,
+                    authenticating: UseStateHandle<bool>| {
+        wasm_bindgen_futures::spawn_local(async move {
             let config = bincode::config::standard();
             let soc = open_soc.deref().read().unwrap();
 
-            match soc.as_ref(){
+            match soc.as_ref() {
                 None => {}
                 Some((s, _)) => {
                     authenticating.set(true);
-                    s.lock().unwrap().send(Message::Bytes(bincode::encode_to_vec(opt, config).unwrap())).await.ok();
+                    s.lock()
+                        .unwrap()
+                        .send(Message::Bytes(bincode::encode_to_vec(opt, config).unwrap()))
+                        .await
+                        .ok();
                 }
             }
-
         });
     };
 
-    let debounce = |opt: ClientOpt, soc: Rc<RwLock<Option<(Mutex<SplitSink<WebSocket, Message>>, Mutex<SplitStream<WebSocket>>)>>>, authenticating: UseStateHandle<bool>| { on_click(move |e|{
-        let soc = soc.clone();
-        let authenticating = authenticating.clone();
-        let b: HtmlButtonElement = e.target_unchecked_into();
-        b.set_disabled(true);
+    let debounce = |opt: ClientOpt,
+                    soc: Rc<
+        RwLock<
+            Option<(
+                Mutex<SplitSink<WebSocket, Message>>,
+                Mutex<SplitStream<WebSocket>>,
+            )>,
+        >,
+    >,
+                    authenticating: UseStateHandle<bool>| {
+        on_click(move |e| {
+            let soc = soc.clone();
+            let authenticating = authenticating.clone();
+            let b: HtmlButtonElement = e.target_unchecked_into();
+            b.set_disabled(true);
 
-        let t = Timeout::new(2_000, move || {
-            b.set_disabled(false)
-        });
-        t.forget();
-        send_opt(opt, soc, authenticating);
-
-    })};
-
-
-
-
+            let t = Timeout::new(2_000, move || b.set_disabled(false));
+            t.forget();
+            send_opt(opt, soc, authenticating);
+        })
+    };
 
     let reboot_button = button("reboot");
-    let reboot_button = if let Some((true, _)) = is_running_or_closed{
-        if !*authenticated || !toast_ready{
+    let reboot_button = if let Some((true, _)) = is_running_or_closed {
+        if !*authenticated || !toast_ready {
             reboot_button.disabled("true".into())
-        }else{
+        } else {
             reboot_button
         }
-    }else{
+    } else {
         reboot_button.disabled("true".into())
     }
-        .listener(debounce(ClientOpt::Reboot, open_soc.clone(), authenticating.clone()));
-
+    .listener(debounce(
+        ClientOpt::Reboot,
+        open_soc.clone(),
+        authenticating.clone(),
+    ));
 
     let shutdown_button = button("shutdown");
-    let shutdown_button = if let Some((true, _)) = is_running_or_closed{
-        if !*authenticated || ! toast_ready{
+    let shutdown_button = if let Some((true, _)) = is_running_or_closed {
+        if !*authenticated || !toast_ready {
             shutdown_button.disabled("true".into())
-
-        }else{
+        } else {
             shutdown_button
         }
-
-    }else{
+    } else {
         shutdown_button.disabled("true".into())
     }
-        .listener(debounce(ClientOpt::Off, open_soc.clone(), authenticating.clone()));
+    .listener(debounce(
+        ClientOpt::Off,
+        open_soc.clone(),
+        authenticating.clone(),
+    ));
 
     let power_on_button = button("power on");
-    let power_on_button = if let Some((_, true)) = is_running_or_closed{
-        if !*authenticated || ! toast_ready{
+    let power_on_button = if let Some((_, true)) = is_running_or_closed {
+        if !*authenticated || !toast_ready {
             power_on_button.disabled("true".into())
-        }else{
+        } else {
             power_on_button
         }
-    }else{
+    } else {
         power_on_button.disabled("true".into())
     }
     .listener(debounce(ClientOpt::On, open_soc, authenticating));
 
-    frag
-        .child(reboot_button)
+    frag.child(reboot_button)
         .child(power_on_button)
         .child(shutdown_button)
         .child(status_display)
         .into()
 }
 
-
-
 #[function_component(ContextedApp)]
 pub fn contexted_app() -> Html {
-
     html! {
         <ResourceProvider>
             <App/>

@@ -1,7 +1,10 @@
-use yew_interop::declare_resources;
-use wasm_bindgen::prelude::*;
+// clippy is dumb, there is a issue for it
+#![allow(clippy::unused_unit)]
+
 use js_sys::{Object, Reflect};
-declare_resources!{
+use wasm_bindgen::prelude::*;
+use yew_interop::declare_resources;
+declare_resources! {
     toast
     "https://cdn.jsdelivr.net/npm/toastify-js@1.11.2/src/toastify.min.js"
     "https://cdn.jsdelivr.net/npm/toastify-js@1.11.2/src/toastify.min.css"
@@ -21,36 +24,16 @@ extern "C" {
 }
 pub fn show_congrats_toast(text: &str) {
     let config = Object::new();
-    Reflect::set(
-        &config,
-        &"text".into(),
-        &text.to_string().into()
-    )
-        .ok();
+    Reflect::set(&config, &"text".into(), &text.to_string().into()).ok();
     let toast = Toast::new(&config);
     toast.show_toast();
 }
 pub fn show_execution_toast(text: &str) {
     let config = Object::new();
     let style = Object::new();
-    Reflect::set(
-        &config,
-        &"text".into(),
-        &text.to_string().into()
-    )
-        .ok();
-    Reflect::set(
-        &style,
-        &"background".into(),
-        &"red".into()
-    )
-        .ok();
-    Reflect::set(
-        &config,
-        &"style".into(),
-        &style
-    )
-        .ok();
+    Reflect::set(&config, &"text".into(), &text.to_string().into()).ok();
+    Reflect::set(&style, &"background".into(), &"red".into()).ok();
+    Reflect::set(&config, &"style".into(), &style).ok();
     let toast = Toast::new(&config);
     toast.show_toast();
 }

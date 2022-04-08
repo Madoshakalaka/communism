@@ -1,8 +1,6 @@
-
 use std::process::{Command, Stdio};
 
 fn main() {
-
     Command::new("cargo")
         .arg("build")
         .arg("--release")
@@ -18,6 +16,6 @@ fn main() {
         .arg("root@xray:/opt/sentinel/sentinel")
         .stdout(Stdio::inherit())
         .stderr(Stdio::inherit())
-        .output().unwrap();
-
+        .output()
+        .unwrap();
 }

@@ -1,4 +1,3 @@
-
 use std::process::{Command, Stdio};
 
 fn main() {
@@ -8,12 +7,13 @@ fn main() {
         .arg("commupack.zip")
         .arg("commupack/")
         .stdout(Stdio::inherit())
-        .output().unwrap();
+        .output()
+        .unwrap();
 
     Command::new("scp")
         .arg("commupack.zip")
         .arg("xray:/site/commupack.zip")
         .stdout(Stdio::inherit())
-        .output().unwrap();
-
+        .output()
+        .unwrap();
 }

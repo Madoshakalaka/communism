@@ -66,7 +66,7 @@ pub fn app() -> Html {
             )
             .child(
                 li()
-                    .child("Lower mouse dip")
+                    .child("Lower mouse dpi")
             )
         )
         .child(

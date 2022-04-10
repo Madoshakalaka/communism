@@ -17,19 +17,37 @@ macro_rules! use_style {
         attr_val
     }};
 }
+/// production/development aware static url
+#[cfg(debug_assertions)]
+macro_rules! static_url {
+    ($rest:tt) => {
+        concat!("/minecraft/fov-calculator/image/", $rest)
+    };
+}
+#[cfg(not(debug_assertions))]
+macro_rules! static_url {
+    ($rest:tt) => {
+        concat!(
+            "https://assets.siyuanyan.net/minecraft/fov-calculator/image/",
+            $rest
+        )
+    };
+}
 
-#[styled_component(App)]
+#[function_component(App)]
 pub fn app() -> Html {
     let tip_list = use_style!("padding-left: 0;");
 
+
+    let portrait_image = use_style!("max-width: 100%;");
     fragment()
         .child(h1("Minecraft FOV Calculator - Kill Motion Sickness"))
         .child(html! {<FovCalculator/>})
         .child(hr())
         .child(h1("How it Works"))
-        .child(p("By using trigonometry, it calculate the FOV such that the game's window looks like a portal to the game world, not too wide, not too narrow.")
+        .child(p("By using trigonometry, it calculates the FOV such that the game's window looks like a portal to the game world, not too wide, not too narrow.")
             .child(br())
-            .child("This convinces your brain what you are seeing is real and stops dizziness.")
+            .child("This convinces your brain that what you are seeing is real and stops dizziness.")
             )
         .child(h1("Other Tips"))
         .child(ul()
@@ -46,6 +64,29 @@ pub fn app() -> Html {
                 li()
                     .child("Disable 'Dynamic FOV'")
             )
+            .child(
+                li()
+                    .child("Lower mouse dip")
+            )
+        )
+        .child(
+            p("It might be impossible to get a playable FOV from a 'small' 27 inch monitor in landscape mode. \
+              You would have to either sit very very close or turn the FOV way down which affects gameplay a lot. \
+              I actually recommend playing in portrait mode on these monitors, \
+              you can also try to play on huge TVs too, like 50 inch ones.")
+        )
+        .child(
+            figure()
+                .child(
+                    img()
+                        .src(static_url!("portrait-27-inch.jpg").into())
+                        .alt("use portrait mode now".into())
+                        .class(portrait_image)
+                ).
+                child(
+                    figcaption()
+                        .child("portrait mode actually looks decent")
+                )
         )
         .into()
 }

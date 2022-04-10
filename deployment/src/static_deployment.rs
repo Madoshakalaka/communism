@@ -10,6 +10,7 @@ use tokio::process::Command;
 
 use crate::StreamExt;
 use walkdir::WalkDir;
+use crate::path_util::CutBase;
 
 async fn list_old_assets(client: &Client, cf_prefix: &str, yew_crate_name: &str) -> Vec<String> {
     let objects = client
@@ -114,7 +115,7 @@ pub async fn deploy<P: AsRef<Path>>(cf_prefix: &str, yew_crate: P) -> Result<()>
 
     let upload_to_s3 = async {
         let mut output = "".to_string();
-        for entry in WalkDir::new(yew_crate.as_ref().join("dist/release/brotli"))
+        for entry in WalkDir::new(yew_crate.as_ref().join("dist/release/uncompressed"))
             .into_iter()
             .filter_map(|e| e.ok())
         {
@@ -125,6 +126,15 @@ pub async fn deploy<P: AsRef<Path>>(cf_prefix: &str, yew_crate: P) -> Result<()>
                 output.push_str(&file_name);
                 output.push('\n');
 
+
+                let cc = path.cut_base("uncompressed");
+                let key_tail = cc.strip_prefix("uncompressed/").unwrap();
+                let path = if file_name.ends_with(".js") || file_name.ends_with(".wasm"){
+                    yew_crate.as_ref().join("dist/release/brotli/").join(&*file_name)
+                }else{
+                    path.into()
+                };
+
                 let body = ByteStream::from_file(File::open(path).await.unwrap())
                     .await
                     .unwrap();
@@ -132,7 +142,7 @@ pub async fn deploy<P: AsRef<Path>>(cf_prefix: &str, yew_crate: P) -> Result<()>
                 let put = client
                     .put_object()
                     .bucket("siyuanyan")
-                    .key(format!("website-assets/{cf_prefix}/{file_name}"))
+                    .key(format!("website-assets/{cf_prefix}/{key_tail}"))
                     .metadata("yew-crate", yew_crate_name.clone())
                     .body(body);
                 let put = if file_name.ends_with(".js") {

@@ -1,4 +1,5 @@
 pub mod static_deployment;
+pub mod path_util;
 
 use async_compression::tokio::write::BrotliEncoder;
 use futures::StreamExt;
@@ -15,7 +16,8 @@ async fn gzip_release_dir<P: AsRef<Path>>(dir: P) -> String {
         .filter_map(|dir| dir.ok())
         .filter_map(|d| {
             let path = d.path().to_owned();
-            (path.is_file() && path.file_name().unwrap().to_string_lossy() != "index.html").then(
+            let file_name = path.file_name().unwrap().to_string_lossy();
+            (path.is_file() && file_name != "index.html" && (file_name.ends_with(".js") || file_name.ends_with(".wasm") )).then(
                 || {
                     path
                     // path.file_name().unwrap().to_string_lossy()

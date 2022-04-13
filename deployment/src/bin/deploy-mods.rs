@@ -3,7 +3,6 @@ use std::process::{Command, Stdio};
 fn main() {
     Command::new("zip")
         .arg("-r") // recursive
-        .arg("-j") // no root folder
         .arg("commupack.zip")
         .arg("commupack/")
         .stdout(Stdio::inherit())
